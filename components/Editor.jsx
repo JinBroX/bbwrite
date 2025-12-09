@@ -1,7 +1,7 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, forwardRef, useImperativeHandle } from 'react';
 import { Loader2, CheckCircle2 } from 'lucide-react';
 
-export default function Editor({ chapter, onSave }) {
+const Editor = forwardRef(({ chapter, onSave, onStatusChange }, ref) => {
   const [title, setTitle] = useState(chapter?.title || '');
   const [content, setContent] = useState(chapter?.content || '');
   const [saveStatus, setSaveStatus] = useState('saved'); // 'saved', 'saving', 'unsaved'
@@ -12,6 +12,18 @@ export default function Editor({ chapter, onSave }) {
   
   // Ref to track latest state for unmount saving
   const stateRef = useRef({ id: chapter?.id, title, content, saveStatus });
+
+  // Expose save method to parent
+  useImperativeHandle(ref, () => ({
+    triggerSave: () => handleManualSave()
+  }));
+
+  // Notify parent of status changes
+  useEffect(() => {
+    if (onStatusChange) {
+        onStatusChange(saveStatus);
+    }
+  }, [saveStatus, onStatusChange]);
 
   // Update stateRef on every change
   useEffect(() => {
@@ -98,17 +110,18 @@ export default function Editor({ chapter, onSave }) {
   const handleManualSave = () => {
     if (onSave && chapter && chapter.id) {
       setSaveStatus('saving');
-      onSave(chapter.id, title, content, { silent: false }) // Show toast for manual save
+      return onSave(chapter.id, title, content, { silent: false }) // Show toast for manual save
         .then(() => setSaveStatus('saved'));
     } else {
         console.warn('Save attempted but no chapter selected or onSave missing', { chapter, onSave });
         if (!chapter) alert('No chapter selected to save.');
+        return Promise.resolve();
     }
   };
 
   return (
     <div style={{ padding: '1rem', height: '100%', display: 'flex', flexDirection: 'column' }}>
-      <div style={{ display: 'flex', alignItems: 'center', marginBottom: '1rem' }}>
+      <div style={{ display: 'flex', alignItems: 'center', marginBottom: '1rem', flexWrap: 'wrap', gap: '10px' }}>
         <input 
           type="text" 
           value={title}
@@ -117,6 +130,7 @@ export default function Editor({ chapter, onSave }) {
             fontSize: '1.5rem', 
             fontWeight: 'bold', 
             flex: 1, 
+            minWidth: '200px',
             border: 'none', 
             borderBottom: '1px solid #ccc',
             marginRight: '1rem',
@@ -124,43 +138,6 @@ export default function Editor({ chapter, onSave }) {
           }}
           placeholder="Chapter Title"
         />
-        
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-            {/* Status Indicator */}
-            <div style={{ fontSize: '0.875rem', color: '#666', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                {saveStatus === 'saving' && (
-                    <>
-                        <Loader2 size={14} className="animate-spin" />
-                        Saving...
-                    </>
-                )}
-                {saveStatus === 'saved' && (
-                    <>
-                        <CheckCircle2 size={14} color="green" />
-                        Saved
-                    </>
-                )}
-                {saveStatus === 'unsaved' && (
-                    <span style={{ color: '#eab308' }}>Unsaved changes</span>
-                )}
-            </div>
-
-            <button 
-            onClick={handleManualSave}
-            style={{
-                padding: '8px 16px',
-                backgroundColor: '#000',
-                color: 'white',
-                border: 'none',
-                borderRadius: '4px',
-                cursor: 'pointer',
-                opacity: saveStatus === 'saving' ? 0.7 : 1
-            }}
-            disabled={saveStatus === 'saving'}
-            >
-            Save
-            </button>
-        </div>
       </div>
       
       <textarea 
@@ -180,4 +157,7 @@ export default function Editor({ chapter, onSave }) {
       />
     </div>
   );
-}
+});
+
+Editor.displayName = 'Editor';
+export default Editor;

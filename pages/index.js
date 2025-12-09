@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import Head from 'next/head';
 import { useRouter } from 'next/router';
 import { useAuth } from '../contexts/AuthContext';
@@ -6,7 +6,7 @@ import { supabase } from '../lib/supabaseClient';
 import OutlineTree from '../components/OutlineTree';
 import Editor from '../components/Editor';
 import AIPanel from '../components/AIPanel';
-import { Menu, PanelRight, X, Loader2 } from 'lucide-react';
+import { Menu, PanelRight, X, Loader2, CheckCircle2, Save } from 'lucide-react';
 import { toast } from 'sonner';
 
 export default function Home() {
@@ -25,6 +25,8 @@ export default function Home() {
   const [activeMaterialId, setActiveMaterialId] = useState(null);
   
   const [loading, setLoading] = useState(true);
+  const [saveStatus, setSaveStatus] = useState('saved');
+  const editorRef = useRef(null);
 
   // Responsive State
   const [isMobile, setIsMobile] = useState(false);
@@ -419,6 +421,12 @@ export default function Home() {
     
     if (isMobile) setShowOutline(false);
   };
+  
+  const handleTriggerSave = () => {
+    if (editorRef.current) {
+        editorRef.current.triggerSave();
+    }
+  };
 
   // Derive Active Item for Editor
   let activeItem = null;
@@ -443,100 +451,179 @@ export default function Home() {
         <link rel="icon" href="/logo.svg" />
       </Head>
 
-      <main style={{ display: 'flex', flexDirection: 'column', height: '100vh', overflow: 'hidden' }}>
+      <main style={{ 
+          display: 'flex', 
+          flexDirection: 'column', 
+          height: '100vh', 
+          backgroundColor: '#f9f9f9', // Light gray background for floating effect
+          padding: isMobile ? '0' : '20px', // Padding around the floating elements on desktop
+          gap: isMobile ? '0' : '20px',
+          overflow: 'hidden' 
+      }}>
         
-        {/* Mobile Header */}
-        {isMobile && (
-            <div style={{ 
-                height: '60px', 
-                borderBottom: '1px solid #ddd', 
-                display: 'flex', 
-                alignItems: 'center', 
-                justifyContent: 'space-between', 
-                padding: '0 1rem',
-                backgroundColor: '#fff'
-            }}>
-                <button onClick={() => setShowOutline(!showOutline)} style={{ background:'none', border:'none' }}>
-                    <Menu size={24} />
-                </button>
-                <span style={{ fontWeight: 'bold' }}>Dowrite</span>
-                <button onClick={() => setShowAI(!showAI)} style={{ background:'none', border:'none' }}>
+        {/* Unified Header (Floating on Desktop, Fixed on Mobile) */}
+        <div style={{ 
+            height: '60px', 
+            borderRadius: isMobile ? '0' : '12px',
+            border: isMobile ? 'none' : '1px solid #e5e5e5',
+            borderBottom: isMobile ? '1px solid #ddd' : '1px solid #e5e5e5',
+            display: 'flex', 
+            alignItems: 'center', 
+            justifyContent: 'space-between', 
+            padding: '0 1rem',
+            backgroundColor: '#fff',
+            zIndex: 30,
+            boxShadow: isMobile ? 'none' : '0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06)',
+            flexShrink: 0
+        }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+                {isMobile && (
+                    <button onClick={() => setShowOutline(!showOutline)} style={{ background:'none', border:'none', cursor:'pointer' }}>
+                        <Menu size={24} />
+                    </button>
+                )}
+                <span style={{ fontWeight: 'bold', fontSize: '1.2rem' }}>Dowrite</span>
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                {/* Save Status & Button (Moved here) */}
+                {activeItem && (
+                    <>
+                        <div style={{ 
+                            fontSize: '0.875rem', 
+                            color: '#666', 
+                            display: isMobile ? 'none' : 'flex', // Hide text on very small screens if needed
+                            alignItems: 'center', 
+                            gap: '4px' 
+                        }}>
+                            {saveStatus === 'saving' && <><Loader2 size={14} className="animate-spin" /> Saving...</>}
+                            {saveStatus === 'saved' && <><CheckCircle2 size={14} color="green" /> Saved</>}
+                            {saveStatus === 'unsaved' && <span style={{ color: '#eab308' }}>Unsaved</span>}
+                        </div>
+
+                        <button 
+                            onClick={handleTriggerSave}
+                            disabled={saveStatus === 'saving'}
+                            style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '6px',
+                                padding: isMobile ? '8px' : '6px 16px',
+                                backgroundColor: isMobile ? 'transparent' : '#000',
+                                color: isMobile ? '#000' : 'white',
+                                border: 'none',
+                                borderRadius: '6px',
+                                cursor: 'pointer',
+                                opacity: saveStatus === 'saving' ? 0.7 : 1
+                            }}
+                        >
+                            <Save size={18} />
+                            {!isMobile && <span>Save</span>}
+                        </button>
+                    </>
+                )}
+
+                <button onClick={() => setShowAI(!showAI)} style={{ background:'none', border:'none', cursor:'pointer' }}>
                     <PanelRight size={24} />
                 </button>
             </div>
-        )}
+        </div>
 
-        <div style={{ display: 'flex', flex: 1, overflow: 'hidden', position: 'relative' }}>
+        <div style={{ display: 'flex', flex: 1, overflow: 'hidden', position: 'relative', gap: isMobile ? '0' : '20px' }}>
             
-            {/* Left Sidebar: Outline */}
+            {/* Left Sidebar: Outline (Floating Card) */}
             {(showOutline || !isMobile) && (
                 <div style={{ 
-                    flex: isMobile ? 'none' : '0 0 20%', 
-                    minWidth: '200px', 
+                    flex: isMobile ? 'none' : '0 0 250px', 
+                    width: isMobile ? '80%' : '250px',
                     maxWidth: isMobile ? '80%' : '300px',
-                    width: isMobile ? '80%' : 'auto',
-                    overflowY: 'auto', 
-                    borderRight: '1px solid #e5e5e5',
-                    position: isMobile ? 'absolute' : 'static',
+                    borderRadius: isMobile ? '0' : '12px',
+                    border: isMobile ? 'none' : '1px solid #e5e5e5',
+                    position: isMobile ? 'absolute' : 'relative',
+                    left: isMobile ? 0 : 'auto',
+                    top: isMobile ? 0 : 'auto',
+                    bottom: isMobile ? 0 : 'auto',
                     height: '100%',
                     zIndex: 20,
                     backgroundColor: 'white',
-                    boxShadow: isMobile ? '2px 0 5px rgba(0,0,0,0.1)' : 'none'
+                    boxShadow: isMobile ? '2px 0 5px rgba(0,0,0,0.1)' : '0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06)',
+                    overflow: 'hidden',
+                    display: 'flex',
+                    flexDirection: 'column'
                 }}>
                   {isMobile && (
                       <div style={{ padding: '10px', textAlign: 'right', borderBottom:'1px solid #eee' }}>
                           <button onClick={() => setShowOutline(false)} style={{ background:'none', border:'none' }}><X size={20}/></button>
                       </div>
                   )}
-                  <OutlineTree 
-                    activeTab={activeTab}
-                    onTabChange={handleSelectTab}
-                    items={activeTab === 'manuscript' ? chapters : activeTab === 'settings' ? settings : materials}
-                    activeItemId={activeTab === 'manuscript' ? activeChapterId : activeTab === 'settings' ? activeSettingId : activeMaterialId}
-                    onSelectItem={handleSelectItem}
-                    onDeleteItem={handleDelete}
-                    onCreateItem={handleCreate}
-                  />
+                  <div style={{ flex: 1, overflowY: 'auto' }}>
+                    <OutlineTree 
+                        activeTab={activeTab}
+                        onTabChange={handleSelectTab}
+                        items={activeTab === 'manuscript' ? chapters : activeTab === 'settings' ? settings : materials}
+                        activeItemId={activeTab === 'manuscript' ? activeChapterId : activeTab === 'settings' ? activeSettingId : activeMaterialId}
+                        onSelectItem={handleSelectItem}
+                        onDeleteItem={handleDelete}
+                        onCreateItem={handleCreate}
+                    />
+                  </div>
                 </div>
             )}
 
-            {/* Center: Editor */}
-            <div style={{ flex: '1', overflowY: 'auto', position: 'relative' }}>
+            {/* Center: Editor (Floating Card) */}
+            <div style={{ 
+                flex: '1', 
+                backgroundColor: 'white', 
+                borderRadius: isMobile ? '0' : '12px',
+                border: isMobile ? 'none' : '1px solid #e5e5e5',
+                boxShadow: isMobile ? 'none' : '0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06)',
+                overflow: 'hidden', 
+                position: 'relative',
+                height: '100%'
+            }}>
               {activeItem && activeItem.content === undefined ? (
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: '#666' }}>
                       <Loader2 className="animate-spin" style={{ marginRight: '8px' }} /> Loading content...
                   </div>
               ) : (
                   <Editor 
+                    ref={editorRef}
                     key={activeItem?.id || 'empty'}
                     chapter={activeItem} 
                     onSave={handleSave}
+                    onStatusChange={setSaveStatus}
                   />
               )}
             </div>
 
-            {/* Right Sidebar: AI Panel */}
+            {/* Right Sidebar: AI Panel (Floating Card) */}
             {(showAI || !isMobile) && (
                 <div style={{ 
-                    flex: isMobile ? 'none' : '0 0 20%', 
-                    minWidth: '250px', 
+                    flex: isMobile ? 'none' : '0 0 300px', 
+                    width: isMobile ? '80%' : '300px',
                     maxWidth: isMobile ? '80%' : '350px',
-                    width: isMobile ? '80%' : 'auto',
-                    overflowY: 'auto', 
-                    borderLeft: '1px solid #e5e5e5',
-                    position: isMobile ? 'absolute' : 'static',
-                    right: 0,
+                    borderRadius: isMobile ? '0' : '12px',
+                    border: isMobile ? 'none' : '1px solid #e5e5e5',
+                    position: isMobile ? 'absolute' : 'relative',
+                    right: isMobile ? 0 : 'auto',
+                    top: isMobile ? 0 : 'auto',
+                    bottom: isMobile ? 0 : 'auto',
                     height: '100%',
                     zIndex: 20,
                     backgroundColor: 'white',
-                    boxShadow: isMobile ? '-2px 0 5px rgba(0,0,0,0.1)' : 'none'
+                    boxShadow: isMobile ? '-2px 0 5px rgba(0,0,0,0.1)' : '0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06)',
+                    overflow: 'hidden',
+                    display: 'flex',
+                    flexDirection: 'column'
                 }}>
                   {isMobile && (
                       <div style={{ padding: '10px', textAlign: 'left', borderBottom:'1px solid #eee' }}>
                           <button onClick={() => setShowAI(false)} style={{ background:'none', border:'none' }}><X size={20}/></button>
                       </div>
                   )}
-                  <AIPanel context={activeItem?.content || ''} />
+                  <div style={{ flex: 1, overflowY: 'auto' }}>
+                    <AIPanel context={activeItem?.content || ''} />
+                  </div>
                 </div>
             )}
 
