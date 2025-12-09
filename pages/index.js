@@ -53,7 +53,7 @@ export default function Home() {
     try {
       const { data, error } = await supabase
         .from('chapters')
-        .select('*')
+        .select('id, project_id, title, order, status') // Exclude content for performance
         .eq('project_id', pid)
         .order('order', { ascending: true });
       if (error) throw error;
@@ -69,7 +69,7 @@ export default function Home() {
     try {
       const { data, error } = await supabase
         .from('settings')
-        .select('*')
+        .select('id, project_id, title, order') // Exclude content
         .eq('project_id', pid)
         .order('order', { ascending: true });
       if (error) throw error;
@@ -86,7 +86,7 @@ export default function Home() {
     try {
       const { data, error } = await supabase
         .from('materials')
-        .select('*')
+        .select('id, project_id, title, order') // Exclude content
         .eq('project_id', pid)
         .order('order', { ascending: true });
       if (error) throw error;
@@ -127,10 +127,96 @@ export default function Home() {
     fetchData();
   }, [user, projectId, authLoading]);
 
-  // Load Content Logic - Removed as content is now part of the item objects
-  // The editor will receive the item directly
+  // Background Content Hydration (The "Silent Loader")
+  // This fetches content for all items in the background after the initial list load.
+  useEffect(() => {
+    if (!user || !projectId) return;
+    
+    // Only run if we have items but they might lack content
+    const hasItems = chapters.length > 0 || settings.length > 0 || materials.length > 0;
+    if (!hasItems) return;
 
+    // Check if we already have full content (optimization to prevent loop)
+    // Just check the first item of each list
+    const needsHydration = (chapters.length > 0 && chapters[0].content === undefined) || 
+                           (settings.length > 0 && settings[0].content === undefined) || 
+                           (materials.length > 0 && materials[0].content === undefined);
 
+    if (!needsHydration) return;
+
+    const hydrateAll = async () => {
+        console.log('Starting background hydration...');
+        
+        // Parallel fetch for all contents
+        const [chData, stData, mtData] = await Promise.all([
+            supabase.from('chapters').select('id, content').eq('project_id', projectId),
+            supabase.from('settings').select('id, content').eq('project_id', projectId),
+            supabase.from('materials').select('id, content').eq('project_id', projectId)
+        ]);
+
+        // Batch updates to minimize renders
+        if (chData.data) {
+            setChapters(prev => prev.map(p => {
+                const match = chData.data.find(c => c.id === p.id);
+                // Only update if content is missing or different (though usually we trust DB here)
+                return match ? { ...p, content: match.content || '' } : p;
+            }));
+        }
+        if (stData.data) {
+            setSettings(prev => prev.map(p => {
+                const match = stData.data.find(s => s.id === p.id);
+                return match ? { ...p, content: match.content || '' } : p;
+            }));
+        }
+        if (mtData.data) {
+            setMaterials(prev => prev.map(p => {
+                const match = mtData.data.find(m => m.id === p.id);
+                return match ? { ...p, content: match.content || '' } : p;
+            }));
+        }
+        console.log('Background hydration complete.');
+    };
+
+    // Small delay to allow initial render to settle and be responsive
+    const timer = setTimeout(() => {
+        hydrateAll();
+    }, 500);
+
+    return () => clearTimeout(timer);
+  }, [user, projectId, chapters.length, settings.length, materials.length]); // Depend on length to trigger when list loads
+
+  // Lazy Load Content (Fallback for immediate clicks)
+  useEffect(() => {
+    const loadContent = async () => {
+        if (activeTab === 'manuscript' && activeChapterId) {
+            const item = chapters.find(c => c.id === activeChapterId);
+            if (item && item.content === undefined) {
+                // Immediate fetch for the clicked item if not yet hydrated
+                const { data } = await supabase.from('chapters').select('content').eq('id', activeChapterId).single();
+                if (data) {
+                    setChapters(prev => prev.map(c => c.id === activeChapterId ? { ...c, content: data.content || '' } : c));
+                }
+            }
+        } else if (activeTab === 'settings' && activeSettingId) {
+            const item = settings.find(s => s.id === activeSettingId);
+            if (item && item.content === undefined) {
+                const { data } = await supabase.from('settings').select('content').eq('id', activeSettingId).single();
+                if (data) {
+                    setSettings(prev => prev.map(s => s.id === activeSettingId ? { ...s, content: data.content || '' } : s));
+                }
+            }
+        } else if (activeTab === 'materials' && activeMaterialId) {
+            const item = materials.find(m => m.id === activeMaterialId);
+            if (item && item.content === undefined) {
+                const { data } = await supabase.from('materials').select('content').eq('id', activeMaterialId).single();
+                if (data) {
+                    setMaterials(prev => prev.map(m => m.id === activeMaterialId ? { ...m, content: data.content || '' } : m));
+                }
+            }
+        }
+    };
+    loadContent();
+  }, [activeTab, activeChapterId, activeSettingId, activeMaterialId]); // Don't depend on full lists here to avoid loops
 
   // SAVE HANDLERS
   const handleSaveChapter = async (id, newTitle, newContent, options = {}) => {
@@ -156,7 +242,7 @@ export default function Home() {
         .eq('id', id);
       if (updateError) throw updateError;
 
-      if (projectId) await fetchChapters(projectId);
+      // Removed fetchChapters to prevent full reload and performance issues
       if (!options.silent) toast.success('Chapter saved!');
     } catch (err) {
       console.error('Save error:', err);
@@ -416,11 +502,17 @@ export default function Home() {
 
             {/* Center: Editor */}
             <div style={{ flex: '1', overflowY: 'auto', position: 'relative' }}>
-              <Editor 
-                key={activeItem?.id || 'empty'}
-                chapter={activeItem} 
-                onSave={handleSave}
-              />
+              {activeItem && activeItem.content === undefined ? (
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: '#666' }}>
+                      <Loader2 className="animate-spin" style={{ marginRight: '8px' }} /> Loading content...
+                  </div>
+              ) : (
+                  <Editor 
+                    key={activeItem?.id || 'empty'}
+                    chapter={activeItem} 
+                    onSave={handleSave}
+                  />
+              )}
             </div>
 
             {/* Right Sidebar: AI Panel */}
